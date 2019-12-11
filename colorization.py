@@ -5,12 +5,11 @@ from scipy import sparse
 from scipy.sparse.linalg import splu
 from skimage.color import rgb2yuv, yuv2rgb
 from skimage.io import imread, imsave
-from sklearn.preprocessing import normalize
 
 eps = np.finfo(np.float64).eps
 
 
-def build_weights_matrix(Y, k):
+def build_weights_matrix(Y, colored, k):
     h, w = Y.shape
     s = h * w
     padding = k // 2
@@ -18,26 +17,29 @@ def build_weights_matrix(Y, k):
     W = sparse.lil_matrix((s, s))
     for r in range(h):
         for c in range(w):
-            # compute neighbour coordinate
-            min_y, max_y = max(r - padding, 0), min(r + padding + 1, h)
-            min_x, max_x = max(c - padding, 0), min(c + padding + 1, w)
-            co = coord[min_y: max_y, min_x: max_x].reshape(-1, 2)
-            p_idx = co[:, 0] * w + co[:, 1]
+            center_idx = r * w + c
+            if center_idx in colored:
+                W[center_idx] = sparse.csr_matrix(([1.0], ([0], [center_idx])), shape=(1, s))
+            else:
+                # compute neighbour coordinate
+                min_y, max_y = max(r - padding, 0), min(r + padding + 1, h)
+                min_x, max_x = max(c - padding, 0), min(c + padding + 1, w)
+                co = coord[min_y: max_y, min_x: max_x].reshape(-1, 2)
+                p_idx = co[:, 0] * w + co[:, 1]
+                mask = p_idx != center_idx  # neighbour index
 
-            # compute weight
-            n = Y[min_y: max_y, min_x:max_x]
-            var_r = np.var(n)
-            # mean_r = np.mean(n)
-            # weights = (1 + 1 / (var_r + eps) * (Y[r, c] - mean_r) * (n - mean_r)).flatten()
-            weights = np.exp(-np.square(Y[r, c] - n) / (2 * var_r + eps)).flatten()
-            # assign to sparse matrix
-            W[r * w + c, p_idx] = -1 * weights
-    # assign all the center to be 0 first, then normalize the weight for the neighbours of each centers
+                # compute weight
+                n = Y[min_y: max_y, min_x:max_x].flatten()[mask]
+                var_r = np.var(n)
+                # mean_r = np.mean(n)
+                # weights = (1 + 1 / (var_r + eps) * (Y[r, c] - mean_r) * (n - mean_r)).flatten()
+                weights = np.exp(-np.square(Y[r, c] - n) / (2 * var_r + eps))
+                norm = np.linalg.norm(weights, ord=1)
+                # assign to sparse matrix
+                W[center_idx, p_idx[mask]] = -1 * np.divide(weights, norm, out=np.zeros_like(weights), where=norm != 0)
     # finally, assign the weight for all pixel center as 1
-    W[np.arange(s), np.arange(s)] = 0
-    Wn = normalize(W, norm='l1', axis=1).tolil()
-    Wn[np.arange(s), np.arange(s)] = 1
-    return Wn
+    W[np.arange(s), np.arange(s)] = 1
+    return W.tocsc()
 
 
 # img_path = fn("samples/flag.bmp")
@@ -47,6 +49,10 @@ def build_weights_matrix(Y, k):
 img_path = fn("samples/baby.bmp")
 mark_img_path = fn("samples/baby_marked.bmp")
 out_img_path = "output/baby_out_"
+
+# img_path = fn("samples/smiley.bmp")
+# mark_img_path = fn("samples/smiley_marked.bmp")
+# out_img_path = "output/smiley_out_"
 
 img = np.float32(imread(img_path))
 marked_img = np.float32(imread(mark_img_path))
@@ -66,13 +72,10 @@ colored_coord_idx = np.unique(diff[0] * W + diff[1])
 kernel = [3, 5, 7]
 
 for k in kernel:
-    Wn = build_weights_matrix(Y, k)
-
-    for pos in colored_coord_idx:
-        Wn[pos] = sparse.csr_matrix(([1.0], ([0], [pos])), shape=(1, H * W))
+    W_matrix = build_weights_matrix(Y, colored_coord_idx, k)
 
     # compute the least-square solution, by computing the pseudo-inverse
-    LU = splu(Wn.tocsc())
+    LU = splu(W_matrix)
 
     b1 = (marked_yuv[:, :, 1]).flatten()
     b2 = (marked_yuv[:, :, 2]).flatten()
