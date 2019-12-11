@@ -42,9 +42,23 @@ def build_weights_matrix(Y, colored, k):
     return W.tocsc()
 
 
-def colorization(W, shape):
+def colorization(img, marked_img, k):
+    H, W, C = img.shape
+
+    # convert to YUV color space
+    img_yuv = rgb2yuv(img)
+    marked_yuv = rgb2yuv(marked_img)
+
+    Y = np.array(img_yuv[:, :, 0])
+
+    # find the color position and update sparse matrix
+    diff = np.where(marked_yuv != img_yuv)
+    colored_coord_idx = np.unique(diff[0] * W + diff[1])
+
+    weight_matrix = build_weights_matrix(Y, colored_coord_idx, k)
+
     # compute the least-square solution, by computing the pseudo-inverse
-    LU = splu(W)
+    LU = splu(weight_matrix)
 
     b1 = (marked_yuv[:, :, 1]).flatten()
     b2 = (marked_yuv[:, :, 2]).flatten()
@@ -52,7 +66,7 @@ def colorization(W, shape):
     U = LU.solve(b1)
     V = LU.solve(b2)
 
-    sol = np.zeros(shape)
+    sol = np.zeros_like(img)
     sol[:, :, 0] = Y
     sol[:, :, 1] = U.reshape((H, W))
     sol[:, :, 2] = V.reshape((H, W))
@@ -75,23 +89,6 @@ out_img_path = "output/baby_out_"
 img = np.float32(imread(img_path))
 marked_img = np.float32(imread(mark_img_path))
 
-H, W, C = img.shape
+out = colorization(img, marked_img, 5)
 
-# convert to YUV color space
-img_yuv = rgb2yuv(img)
-marked_yuv = rgb2yuv(marked_img)
-
-Y = np.array(img_yuv[:, :, 0])
-
-# find the color position and update sparse matrix
-diff = np.where(marked_yuv != img_yuv)
-colored_coord_idx = np.unique(diff[0] * W + diff[1])
-
-kernel = [3, 5, 7]
-
-for k in kernel:
-    W_matrix = build_weights_matrix(Y, colored_coord_idx, k)
-
-    out = colorization(W_matrix, img.shape)
-
-    imsave(fn(out_img_path + "kernel_{}.png".format(k)), yuv2rgb(out))
+imsave(fn(out_img_path + "kernel_5.png"), yuv2rgb(out))
