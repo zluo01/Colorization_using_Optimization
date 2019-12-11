@@ -42,6 +42,24 @@ def build_weights_matrix(Y, colored, k):
     return W.tocsc()
 
 
+def colorization(W, shape):
+    # compute the least-square solution, by computing the pseudo-inverse
+    LU = splu(W)
+
+    b1 = (marked_yuv[:, :, 1]).flatten()
+    b2 = (marked_yuv[:, :, 2]).flatten()
+
+    U = LU.solve(b1)
+    V = LU.solve(b2)
+
+    sol = np.zeros(shape)
+    sol[:, :, 0] = Y
+    sol[:, :, 1] = U.reshape((H, W))
+    sol[:, :, 2] = V.reshape((H, W))
+
+    return sol
+
+
 # img_path = fn("samples/flag.bmp")
 # mark_img_path = fn("samples/flag_marked.bmp")
 # out_img_path = "output/flag_out_"
@@ -74,18 +92,6 @@ kernel = [3, 5, 7]
 for k in kernel:
     W_matrix = build_weights_matrix(Y, colored_coord_idx, k)
 
-    # compute the least-square solution, by computing the pseudo-inverse
-    LU = splu(W_matrix)
+    out = colorization(W_matrix, img.shape)
 
-    b1 = (marked_yuv[:, :, 1]).flatten()
-    b2 = (marked_yuv[:, :, 2]).flatten()
-
-    U = LU.solve(b1)
-    V = LU.solve(b2)
-
-    sol = np.zeros(np.shape(img))
-    sol[:, :, 0] = Y
-    sol[:, :, 1] = U.reshape((H, W))
-    sol[:, :, 2] = V.reshape((H, W))
-
-    imsave(fn(out_img_path + "kernel_{}.png".format(k)), yuv2rgb(sol))
+    imsave(fn(out_img_path + "kernel_{}.png".format(k)), yuv2rgb(out))
